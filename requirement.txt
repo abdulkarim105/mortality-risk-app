@@ -1,8 +1,1 @@
-streamlit
-numpy
-pandas
-scikit-learn
-xgboost
-shap
-matplotlib
-joblib
+Remove incorrect requirement.txt
