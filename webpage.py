@@ -7,45 +7,117 @@ import shap
 import matplotlib.pyplot as plt
 
 # -----------------------------
-# Page config + styling
+# Page config
 # -----------------------------
-st.set_page_config(page_title="Mortality Risk Predictor (XGBoost)", page_icon="🩺", layout="wide")
+st.set_page_config(
+    page_title="Mortality Risk Predictor",
+    page_icon="🩺",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
+# -----------------------------
+# Styling (professional + title not clipped)
+# -----------------------------
 st.markdown(
     """
     <style>
-      .block-container { padding-top: 3.6rem; padding-bottom: 2rem; }
-      .app-title { font-size: 2.1rem; font-weight: 800; margin-top: .8rem; margin-bottom: .25rem; line-height: 1.2; }
-      .app-subtitle { color: #6b7280; margin-top: 0; margin-bottom: 1.2rem; }
-      .card {
-        border: 1px solid rgba(0,0,0,.08);
-        border-radius: 16px;
-        padding: 18px 18px;
+      :root{
+        --card-border: rgba(0,0,0,.08);
+        --muted: #6b7280;
+        --bg-soft: rgba(249,250,251,1);
+      }
+
+      /* Fix title clipping */
+      .block-container { padding-top: 3.4rem; padding-bottom: 2rem; max-width: 1280px; }
+
+      .topbar{
+        display:flex;
+        flex-wrap: wrap;
+        align-items:flex-end;
+        justify-content:space-between;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+      .title-wrap{ flex: 1 1 520px; min-width: 320px; }
+      .app-title{
+        font-size: 2.2rem;
+        font-weight: 850;
+        line-height: 1.25;
+        margin: 0;
+        padding-top: 2px;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .app-subtitle{
+        color: var(--muted);
+        margin: 0;
+        margin-top: 6px;
+        font-size: 1.02rem;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      .chip{
+        flex: 0 0 auto;
+        max-width: 100%;
+        white-space: nowrap;
+        display:inline-flex; align-items:center; gap:8px;
+        border: 1px solid var(--card-border);
+        border-radius: 999px;
+        padding: 8px 12px;
+        background: white;
+        box-shadow: 0 10px 25px rgba(0,0,0,.04);
+        font-size: .92rem;
+        color: var(--muted);
+      }
+      .chip b { color: #111827; font-weight: 750; }
+
+      .card{
+        border: 1px solid var(--card-border);
+        border-radius: 18px;
+        padding: 16px 16px;
         background: white;
         box-shadow: 0 10px 25px rgba(0,0,0,.04);
       }
-      .muted { color: #6b7280; font-size: .95rem; }
-      .divider { height: 1px; background: rgba(0,0,0,.06); margin: 14px 0; }
-      .kpi { display:flex; gap:14px; flex-wrap:wrap; margin-top: 10px; }
-      .kpi-box{
-        border: 1px solid rgba(0,0,0,.08);
+      .muted{ color: var(--muted); }
+
+      .soft{
+        border: 1px solid var(--card-border);
+        background: var(--bg-soft);
         border-radius: 14px;
         padding: 12px 14px;
-        min-width: 190px;
-        background: rgba(249,250,251,1);
       }
-      .kpi-label{ font-size: .85rem; color:#6b7280; }
-      .kpi-value{ font-size: 1.55rem; font-weight: 800; margin-top: 2px; }
-      .stButton>button { border-radius: 12px; padding: 0.60rem 1rem; font-weight: 750; }
-      .stNumberInput input { border-radius: 12px !important; }
-      .small-note { font-size: .85rem; color:#6b7280; }
+
+      .kpis{
+        display:grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .kpi{
+        border: 1px solid var(--card-border);
+        border-radius: 16px;
+        padding: 12px 14px;
+        background: var(--bg-soft);
+      }
+      .kpi .label{ color: var(--muted); font-size: .86rem; }
+      .kpi .value{ font-size: 1.55rem; font-weight: 850; margin-top: 2px; }
+      .kpi .sub{ color: var(--muted); font-size: .86rem; margin-top: 2px; }
+
+      .hr{ height:1px; background: rgba(0,0,0,.06); margin: 12px 0; }
+
+      .stButton>button{ border-radius: 12px; padding: 0.60rem 1rem; font-weight: 750; }
+      .stNumberInput input, .stTextInput input{ border-radius: 12px !important; }
+      .stDataFrame{ border-radius: 14px; overflow: hidden; }
+
+      section[data-testid="stSidebar"] .block-container{ padding-top: 1.2rem; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # -----------------------------
-# Files (must be in same folder as this webpage.py)
+# Files
 # -----------------------------
 MODEL_FILENAME = "mortality_xgboost_pipeline.joblib"
 MODEL_PATH = os.path.join(os.path.dirname(__file__), MODEL_FILENAME)
@@ -62,77 +134,73 @@ pipeline = obj["pipeline"]
 feature_cols = obj["feature_cols"]
 default_threshold = float(obj.get("threshold", 0.5))
 
-# Pipeline steps
 imputer = pipeline.named_steps["imputer"]
 xgb_model = pipeline.named_steps["model"]
 
 # -----------------------------
-# SHAP explainer (cached) - robust to probability/log-odds
+# Group features (FIXED: AGE will not go to Labs)
+# -----------------------------
+def group_features(cols):
+    groups = {"Vitals": [], "Labs": [], "Scores / Comorbidity": [], "Other": []}
+
+    score_keys = ("GCS", "SOFA", "SAPS", "OASIS", "COMORB", "AGE", "COMORBIDITY", "SCORE")
+    vitals_keys = ("HR", "RR", "SBP", "DBP", "MBP", "SYSBP", "DIASBP", "SPO2", "TEMP", "O2", "RESP")
+
+    # Lab tokens (do NOT include raw "AG" here)
+    labs_tokens = {
+        "BUN", "CREAT", "WBC", "HGB", "HCT", "PLT", "SOD", "POT", "CHL", "GLU",
+        "BILI", "ALT", "AST", "ALB", "LACT", "LACTATE", "BILIRUBIN"
+    }
+
+    def is_anion_gap(name: str) -> bool:
+        # matches AG, AG_, _AG, _AG_ but NOT AGE
+        u = name.upper()
+        return (u == "AG") or ("AG_" in u) or ("_AG" in u)
+
+    for c in cols:
+        u = c.upper()
+
+        # 1) scores first
+        if any(k in u for k in score_keys):
+            groups["Scores / Comorbidity"].append(c)
+
+        # 2) vitals
+        elif any(k in u for k in vitals_keys):
+            groups["Vitals"].append(c)
+
+        # 3) labs strict
+        else:
+            token_hit = any(tok in u for tok in labs_tokens)
+            if token_hit or is_anion_gap(c):
+                groups["Labs"].append(c)
+            else:
+                groups["Other"].append(c)
+
+    return {k: v for k, v in groups.items() if v}
+
+# IMPORTANT: create feature_groups (this prevents NameError)
+feature_groups = group_features(feature_cols)
+
+# -----------------------------
+# SHAP explainer (cached)
 # -----------------------------
 @st.cache_resource
 def build_shap_explainer(_xgb_model):
-    """
-    Prefer probability explanation if supported; otherwise fallback.
-    Some SHAP versions / model combos don't support model_output="probability".
-    """
-    try:
-        expl = shap.TreeExplainer(_xgb_model, model_output="probability")
-        shap_units = "probability"
-        return expl, shap_units
-    except Exception:
-        expl = shap.TreeExplainer(_xgb_model)
-        shap_units = "model output (often log-odds)"
-        return expl, shap_units
+    return shap.TreeExplainer(_xgb_model)
 
-explainer, shap_units = build_shap_explainer(xgb_model)
-
-def _extract_shap_values(expl_result) -> np.ndarray:
-    """
-    Return SHAP values as numpy array, robust to:
-      - shap.Explanation (preferred modern API)
-      - older arrays / list-of-arrays for multiclass
-    """
-    # New API: shap.Explanation
-    if hasattr(expl_result, "values"):
-        values = expl_result.values
-    else:
-        values = expl_result
-
-    # Sometimes values is a list (e.g., multiclass). For binary some versions return 2 arrays.
-    if isinstance(values, list):
-        # Prefer positive class if present
-        if len(values) == 2:
-            values = values[1]
-        else:
-            # Fallback: take last class
-            values = values[-1]
-
-    values = np.asarray(values)
-
-    # Ensure 2D
-    if values.ndim == 1:
-        values = values.reshape(1, -1)
-
-    return values
+explainer = build_shap_explainer(xgb_model)
 
 def compute_shap_values_single_row(X_user_df: pd.DataFrame) -> np.ndarray:
-    """
-    Compute SHAP values for one-row input.
-    IMPORTANT: apply the imputer transform first because SHAP must see the same
-    matrix that the underlying XGBoost model sees.
-    """
-    X_user_df = X_user_df[feature_cols]
-    X_imp = imputer.transform(X_user_df)
+    X_imp = imputer.transform(X_user_df[feature_cols])
+    sv = explainer.shap_values(X_imp)
 
-    # Preferred modern call: explainer(X)
-    try:
-        exp = explainer(X_imp)
-        sv = _extract_shap_values(exp)
-    except Exception:
-        # Older SHAP versions
-        sv = _extract_shap_values(explainer.shap_values(X_imp))
+    if isinstance(sv, list) and len(sv) == 2:
+        sv = sv[1]
 
-    return sv[0]  # 1 row
+    sv = np.array(sv)
+    if sv.ndim == 2:
+        return sv[0]
+    return sv
 
 # -----------------------------
 # Helpers
@@ -140,30 +208,17 @@ def compute_shap_values_single_row(X_user_df: pd.DataFrame) -> np.ndarray:
 def risk_band(p: float):
     if p < 0.30:
         return "Low", "🟢"
-    elif p < 0.70:
+    if p < 0.70:
         return "Moderate", "🟠"
     return "High", "🔴"
 
-def build_input_df(input_dict: dict) -> pd.DataFrame:
-    """
-    Create 1-row DataFrame with correct feature order.
-    Missing columns -> NaN, handled by pipeline imputer.
-    """
-    X = pd.DataFrame([input_dict])
-    for c in feature_cols:
-        if c not in X.columns:
-            X[c] = np.nan
-    return X[feature_cols]
-
-# -----------------------------
-# Header
-# -----------------------------
-st.markdown('<div class="app-title">Mortality Risk Predictor</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="app-subtitle">XGBoost pipeline (Median Imputation + XGBoost) — '
-    'Enter patient values, predict mortality probability, and explain with SHAP.</div>',
-    unsafe_allow_html=True
-)
+def interpret(prob: float):
+    band, icon = risk_band(prob)
+    if band == "Low":
+        return icon, band, "Lower risk band based on the model output."
+    if band == "Moderate":
+        return icon, band, "Moderate risk band based on the model output."
+    return icon, band, "Higher risk band based on the model output."
 
 # -----------------------------
 # Session state
@@ -178,140 +233,304 @@ if "show_shap" not in st.session_state:
     st.session_state.show_shap = False
 
 # -----------------------------
-# Sidebar inputs (FIX: allow Missing instead of forcing 0.0)
+# Header
+# -----------------------------
+st.markdown(
+    """
+    <div class="topbar">
+      <div class="title-wrap">
+        <div class="app-title">Mortality Risk Predictor</div>
+        <div class="app-subtitle">
+          XGBoost pipeline (Median Imputation + XGBoost).
+          Patient-level probability + SHAP explanation.
+        </div>
+      </div>
+      <div class="chip">Model: <b>XGBoost</b> • Output: <b>Probability</b></div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# -----------------------------
+# Sidebar inputs (search + groups + missing)
 # -----------------------------
 with st.sidebar:
     st.header("Patient Inputs")
-    threshold = st.slider("Classification threshold", 0.05, 0.95, default_threshold, 0.01)
 
-    st.markdown("<div class='small-note'>Tip: mark a feature as <b>Missing</b> if you don't know it. "
-                "The pipeline will median-impute it.</div>", unsafe_allow_html=True)
+    threshold = st.slider(
+        "Classification threshold",
+        0.05,
+        0.95,
+        default_threshold,
+        0.01
+    )
 
-    st.subheader("Clinical features")
+    st.markdown("**Find a feature**")
+    q = st.text_input(
+        "Search",
+        value="",
+        placeholder="Type to filter (e.g., lactate, gcs, bun)",
+        label_visibility="collapsed"
+    )
+
+    st.markdown("**Show groups**")
+    selected_groups = st.multiselect(
+        "Feature groups",
+        options=list(feature_groups.keys()),
+        default=list(feature_groups.keys()),
+        label_visibility="collapsed",
+    )
+
+    st.markdown("---")
+    st.caption("Tip: Mark a feature as Missing if you don’t know it. The pipeline will handle it.")
 
     input_data = {}
-    # Create compact UI: each feature has (Missing checkbox + number input)
+    missing_cols = []
+
+    for g in selected_groups:
+        cols_in_g = feature_groups.get(g, [])
+
+        if q.strip():
+            ql = q.strip().lower()
+            cols_in_g = [c for c in cols_in_g if ql in c.lower()]
+
+        if not cols_in_g:
+            continue
+
+        with st.expander(g, expanded=(g in ["Vitals", "Labs"])):
+            for c in cols_in_g:
+                colA, colB = st.columns([0.42, 0.58])
+
+                with colA:
+                    is_missing = st.checkbox(f"{c} missing", value=False, key=f"miss_{c}")
+
+                with colB:
+                    val = st.number_input(
+                        c,
+                        value=0.0,
+                        step=0.1,
+                        format="%.3f",
+                        key=f"val_{c}",
+                        disabled=is_missing
+                    )
+
+                if is_missing:
+                    input_data[c] = np.nan
+                    missing_cols.append(c)
+                else:
+                    input_data[c] = float(val)
+
+    # Any feature not shown -> NaN (pipeline imputes)
     for c in feature_cols:
-        colA, colB = st.columns([0.42, 0.58])
-        with colA:
-            is_missing = st.checkbox(f"{c} missing", value=False, key=f"miss__{c}")
-        with colB:
-            val = st.number_input(c, value=0.0, step=0.1, format="%.3f", key=f"val__{c}", disabled=is_missing)
+        if c not in input_data:
+            input_data[c] = np.nan
 
-        input_data[c] = np.nan if is_missing else float(val)
-
+    st.markdown("---")
     run_pred = st.button("Predict Risk", use_container_width=True)
 
-# Build input DataFrame
-X_user = build_input_df(input_data)
+# Build input DF in correct order
+X_user = pd.DataFrame([input_data])[feature_cols]
 
 # -----------------------------
-# Layout
+# Tabs
 # -----------------------------
-left, right = st.columns([1.25, 1])
+tab_pred, tab_shap, tab_about = st.tabs([
+    "📈 Risk Prediction",
+    "🧠 Model Explainability",
+    "📄 About the Model"
+])
 
-with left:
+# -----------------------------
+# Prediction tab
+# -----------------------------
+with tab_pred:
+    left, right = st.columns([1.25, 1])
+
+    with left:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### Patient snapshot")
+
+        with st.expander("View input table (all features)", expanded=False):
+            st.dataframe(X_user, use_container_width=True, hide_index=True)
+
+        if len(missing_cols) > 0:
+            st.markdown(
+                f"<div class='soft muted'><b>Marked as missing:</b> {', '.join(missing_cols[:20])}"
+                + (" ..." if len(missing_cols) > 20 else "")
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown("<div class='soft muted'>No features were marked as missing.</div>", unsafe_allow_html=True)
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with right:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### Risk output")
+
+        if run_pred:
+            prob = float(pipeline.predict_proba(X_user)[0, 1])
+            pred = int(prob >= threshold)
+
+            st.session_state.last_X_user = X_user
+            st.session_state.last_prob = prob
+            st.session_state.last_pred = pred
+
+        if st.session_state.last_prob is None:
+            st.markdown('<div class="muted">Click <b>Predict Risk</b> to generate results.</div>', unsafe_allow_html=True)
+        else:
+            prob = st.session_state.last_prob
+            pred = st.session_state.last_pred
+            icon, band, msg = interpret(prob)
+
+            st.markdown(
+                f"""
+                <div class="kpis">
+                  <div class="kpi">
+                    <div class="label">Predicted probability</div>
+                    <div class="value">{prob:.3f}</div>
+                    <div class="sub">P(mortality)</div>
+                  </div>
+                  <div class="kpi">
+                    <div class="label">Risk band</div>
+                    <div class="value">{icon} {band}</div>
+                    <div class="sub">Rule: &lt;0.30 low, &lt;0.70 moderate</div>
+                  </div>
+                  <div class="kpi">
+                    <div class="label">Class</div>
+                    <div class="value">{pred}</div>
+                    <div class="sub">Threshold = {threshold:.2f}</div>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+            st.markdown("#### Risk gauge")
+            st.progress(min(max(prob, 0.0), 1.0))
+
+            if band == "Low":
+                st.success(msg)
+            elif band == "Moderate":
+                st.warning(msg)
+            else:
+                st.error(msg)
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+# -----------------------------
+# SHAP tab
+# -----------------------------
+with tab_shap:
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("### Inputs summary")
-    st.dataframe(X_user, use_container_width=True, hide_index=True)
-    st.caption("Missing values are handled by the pipeline (median imputation).")
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("### Patient-level explanation (SHAP)")
+    st.markdown(
+        '<div class="muted">Positive SHAP values increase predicted risk; negative values decrease it. '
+        "Explanations are computed for the last predicted patient.</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-with right:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("### Result")
+    c1, c2, c3 = st.columns([1, 1, 2])
+    with c1:
+        explain_btn = st.button("Explain prediction", use_container_width=True)
+    with c2:
+        hide_btn = st.button("Hide explanation", use_container_width=True)
+    with c3:
+        top_k = st.slider("Top features to show", 5, 30, 12, 1)
 
-    if run_pred:
-        prob = float(pipeline.predict_proba(X_user)[0, 1])
-        pred = int(prob >= threshold)
+    if hide_btn:
+        st.session_state.show_shap = False
+    if explain_btn:
+        st.session_state.show_shap = True
 
-        st.session_state.last_X_user = X_user
-        st.session_state.last_prob = prob
-        st.session_state.last_pred = pred
-
-    if st.session_state.last_prob is None:
-        st.markdown("<div class='muted'>Click <b>Predict Risk</b> to generate results.</div>", unsafe_allow_html=True)
+    if st.session_state.last_X_user is None:
+        st.info("Run a prediction first in the **Risk Prediction** tab, then come back here.")
         st.markdown("</div>", unsafe_allow_html=True)
     else:
-        prob = float(st.session_state.last_prob)
-        pred = int(st.session_state.last_pred)
-        band, icon = risk_band(prob)
+        if not st.session_state.show_shap:
+            st.caption("Click **Explain prediction** to compute SHAP.")
+            st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            X_to_explain = st.session_state.last_X_user
 
-        st.markdown(
-            f"""
-            <div class="kpi">
-              <div class="kpi-box">
-                <div class="kpi-label">Predicted probability</div>
-                <div class="kpi-value">{prob:.3f}</div>
-              </div>
-              <div class="kpi-box">
-                <div class="kpi-label">Risk band</div>
-                <div class="kpi-value">{icon} {band}</div>
-              </div>
-              <div class="kpi-box">
-                <div class="kpi-label">Class (threshold {threshold:.2f})</div>
-                <div class="kpi-value">{pred}</div>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True
+            with st.spinner("Computing SHAP explanation..."):
+                sv = compute_shap_values_single_row(X_to_explain)
+                df_shap = pd.DataFrame({"feature": feature_cols, "shap_value": sv})
+                df_shap["abs"] = df_shap["shap_value"].abs()
+                df_top = df_shap.sort_values("abs", ascending=False).head(top_k)
+
+            l, r = st.columns([1.15, 1])
+
+            with l:
+                st.markdown("#### Top contributors")
+                st.dataframe(df_top[["feature", "shap_value"]], use_container_width=True, hide_index=True)
+
+            with r:
+                st.markdown("#### Feature impact chart")
+
+                df_plot = df_top.copy()
+                fig_height = max(5, 0.35 * len(df_plot) + 1.5)
+
+                fig = plt.figure(figsize=(10, fig_height))
+                plt.barh(df_plot["feature"][::-1], df_plot["shap_value"][::-1])
+                plt.axvline(0, linewidth=1)
+                plt.xlabel("SHAP value  ( + increases risk )")
+                plt.ylabel("")
+                plt.title("Top feature impacts for this patient", pad=12)
+                plt.tight_layout()
+                plt.subplots_adjust(left=0.35)
+                st.pyplot(fig)
+
+            st.caption("SHAP is computed on demand using TreeExplainer for XGBoost.")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+with st.expander("Advanced view: Waterfall plot (single patient)", expanded=False):
+    try:
+        X_to_explain = st.session_state.last_X_user
+
+        # base value for model output (log-odds space)
+        base_value = explainer.expected_value
+        if isinstance(base_value, (list, np.ndarray)):
+            base_value = base_value[1] if len(base_value) > 1 else base_value[0]
+
+        # imputed input (same as model sees)
+        X_imp = imputer.transform(X_to_explain[feature_cols])
+
+        # SHAP values for this single patient
+        sv = compute_shap_values_single_row(X_to_explain)
+
+        exp = shap.Explanation(
+            values=sv,
+            base_values=base_value,
+            data=X_imp[0],
+            feature_names=feature_cols,
         )
 
-        st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
-        st.markdown("#### Risk gauge")
-        st.progress(min(max(prob, 0.0), 1.0))
+        # Make plot larger so labels don’t overlap
+        fig2 = plt.figure(figsize=(10, 7))
+        shap.plots.waterfall(exp, max_display=20, show=False)
+        plt.tight_layout()
+        st.pyplot(fig2)
 
-        if band == "Low":
-            st.success("Lower risk band based on the model output.")
-        elif band == "Moderate":
-            st.warning("Moderate risk band based on the model output.")
-        else:
-            st.error("Higher risk band based on the model output.")
+    except Exception as e:
+        st.warning(f"Could not render waterfall plot. Details: {e}")
 
-        # -----------------------------
-        # SHAP (stateful)
-        # -----------------------------
-        st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
-
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Explain prediction (SHAP)", use_container_width=True):
-                st.session_state.show_shap = True
-        with c2:
-            if st.button("Hide explanation", use_container_width=True):
-                st.session_state.show_shap = False
-
-        if st.session_state.show_shap:
-            st.markdown("### Explainability (SHAP)")
-
-            X_to_explain = st.session_state.last_X_user
-            if X_to_explain is None:
-                st.warning("Please click **Predict Risk** first, then click **Explain prediction (SHAP)**.")
-            else:
-                with st.spinner("Computing SHAP explanation..."):
-                    sv = compute_shap_values_single_row(X_to_explain)
-
-                    df_shap = pd.DataFrame(
-                        {"feature": feature_cols, "shap_value": sv}
-                    )
-                    df_shap["abs"] = df_shap["shap_value"].abs()
-                    df_top = df_shap.sort_values("abs", ascending=False).head(20)
-
-                    st.markdown("#### Top contributors (|SHAP|)")
-                    st.dataframe(df_top[["feature", "shap_value"]], use_container_width=True, hide_index=True)
-
-                    fig = plt.figure()
-                    plt.barh(df_top["feature"][::-1], df_top["shap_value"][::-1])
-                    plt.xlabel(f"SHAP value ({shap_units})")
-                    plt.title("Top feature impacts for this patient")
-                    plt.tight_layout()
-                    st.pyplot(fig)
-
-                st.caption(
-                    "Note: SHAP values explain the XGBoost model output on the imputed input. "
-                    "If 'probability' is not supported, SHAP may explain log-odds / margin instead."
-                )
-        else:
-            st.caption("Click **Explain prediction (SHAP)** to compute explanations.")
-
+# -----------------------------
+# About tab
+# -----------------------------
+with tab_about:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown("### About this app")
+    st.markdown(
+        """
+- **Model:** XGBoost classifier  
+- **Preprocessing:** Median imputation (inside the pipeline)  
+- **Inputs:** Clinical numeric features only   
+- **Output:** Probability of in-hospital mortality + binary class based on threshold  
+- **Explainability:** SHAP values (patient-level feature contributions)
+        """
+    )
     st.markdown("</div>", unsafe_allow_html=True)
