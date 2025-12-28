@@ -27,49 +27,27 @@ st.markdown(
         --muted: #6b7280;
         --bg-soft: rgba(249,250,251,1);
       }
-
-      /* Fix title clipping */
       .block-container { padding-top: 3.4rem; padding-bottom: 2rem; max-width: 1280px; }
-
       .topbar{
-        display:flex;
-        flex-wrap: wrap;
-        align-items:flex-end;
-        justify-content:space-between;
-        gap: 12px;
-        margin-bottom: 14px;
+        display:flex; flex-wrap: wrap; align-items:flex-end; justify-content:space-between;
+        gap: 12px; margin-bottom: 14px;
       }
       .title-wrap{ flex: 1 1 520px; min-width: 320px; }
       .app-title{
-        font-size: 2.2rem;
-        font-weight: 850;
-        line-height: 1.25;
-        margin: 0;
-        padding-top: 2px;
-        overflow-wrap: anywhere;
-        word-break: break-word;
+        font-size: 2.2rem; font-weight: 850; line-height: 1.25; margin: 0; padding-top: 2px;
+        overflow-wrap: anywhere; word-break: break-word;
       }
       .app-subtitle{
-        color: var(--muted);
-        margin: 0;
-        margin-top: 6px;
-        font-size: 1.02rem;
-        overflow-wrap: anywhere;
-        word-break: break-word;
+        color: var(--muted); margin: 0; margin-top: 6px; font-size: 1.02rem;
+        overflow-wrap: anywhere; word-break: break-word;
       }
-
       .chip{
-        flex: 0 0 auto;
-        max-width: 100%;
-        white-space: nowrap;
+        flex: 0 0 auto; max-width: 100%; white-space: nowrap;
         display:inline-flex; align-items:center; gap:8px;
         border: 1px solid var(--card-border);
-        border-radius: 999px;
-        padding: 8px 12px;
-        background: white;
+        border-radius: 999px; padding: 8px 12px; background: white;
         box-shadow: 0 10px 25px rgba(0,0,0,.04);
-        font-size: .92rem;
-        color: var(--muted);
+        font-size: .92rem; color: var(--muted);
       }
       .chip b { color: #111827; font-weight: 750; }
 
@@ -123,6 +101,41 @@ MODEL_FILENAME = "mortality_xgboost_pipeline.joblib"
 MODEL_PATH = os.path.join(os.path.dirname(__file__), MODEL_FILENAME)
 
 # -----------------------------
+# Feature ranges (from your screenshot)
+# If value is outside -> show "not valid" message and block prediction
+# -----------------------------
+FEATURE_RANGES = {
+    "GCS_max": (1.0, 6.0),
+    "GCS_mean": (1.0, 6.0),
+    "Lactate_min": (0.0, 21.2),
+    "Lactate_max": (0.3, 32.0),
+    "Lactate_mean": (0.3, 24.916666666666668),
+    "BUN_min": (0.0, 196.0),
+    "BUN_mean": (1.2857142857142858, 216.5),
+    "Bilirubin_max": (0.0, 79.0),
+    "Bilirubin_mean": (0.0, 68.66666666666667),
+    "AG_MEAN": (5.5, 43.0),
+    "AG_MAX": (6.0, 50.0),
+    "AG_MEDIAN": (5.5, 44.5),
+    "AG_MIN": (5.0, 35.0),
+    "AG_STD": (0.0, 17.03917055884274),
+    "SYSBP_MIN": (6.059999998658895, 154.0),
+    "SYSBP_MEAN": (29.166666666666668, 185.47115384615384),
+    "SYSBP_STD": (3.51281500808764, 51.85476512979947),
+    "DIASBP_MIN": (0.3199999928474426, 84.0),
+    "DIASBP_MEAN": (14.5, 109.92682926829268),
+    "AGE": (18.0, 90.0),
+    "RR_MEAN": (8.325581395348838, 42.80952380952381),
+    "RR_STD": (0.0, 13.758321004205568),
+    "RR_MAX": (12.0, 59.0),
+    "TEMP_STD": (0.0, 2.9912423613270653),
+    "TEMP_MIN": (25.200000762939453, 40.1),
+    "HR_MEAN": (35.93617021276596, 154.44897959183675),
+    "HR_MAX": (53.0, 245.0),
+    "age_adj_comorbidity_score": (0.0, 58.0),
+}
+
+# -----------------------------
 # Load pipeline object
 # -----------------------------
 @st.cache_resource
@@ -146,29 +159,22 @@ def group_features(cols):
     score_keys = ("GCS", "SOFA", "SAPS", "OASIS", "COMORB", "AGE", "COMORBIDITY", "SCORE")
     vitals_keys = ("HR", "RR", "SBP", "DBP", "MBP", "SYSBP", "DIASBP", "SPO2", "TEMP", "O2", "RESP")
 
-    # Lab tokens (do NOT include raw "AG" here)
     labs_tokens = {
         "BUN", "CREAT", "WBC", "HGB", "HCT", "PLT", "SOD", "POT", "CHL", "GLU",
         "BILI", "ALT", "AST", "ALB", "LACT", "LACTATE", "BILIRUBIN"
     }
 
     def is_anion_gap(name: str) -> bool:
-        # matches AG, AG_, _AG, _AG_ but NOT AGE
         u = name.upper()
-        return (u == "AG") or ("AG_" in u) or ("_AG" in u)
+        return (u == "AG") or ("AG_" in u) or ("_AG" in u)  # NOT AGE
 
     for c in cols:
         u = c.upper()
 
-        # 1) scores first
         if any(k in u for k in score_keys):
             groups["Scores / Comorbidity"].append(c)
-
-        # 2) vitals
         elif any(k in u for k in vitals_keys):
             groups["Vitals"].append(c)
-
-        # 3) labs strict
         else:
             token_hit = any(tok in u for tok in labs_tokens)
             if token_hit or is_anion_gap(c):
@@ -178,7 +184,6 @@ def group_features(cols):
 
     return {k: v for k, v in groups.items() if v}
 
-# IMPORTANT: create feature_groups (this prevents NameError)
 feature_groups = group_features(feature_cols)
 
 # -----------------------------
@@ -195,7 +200,7 @@ def compute_shap_values_single_row(X_user_df: pd.DataFrame) -> np.ndarray:
     sv = explainer.shap_values(X_imp)
 
     if isinstance(sv, list) and len(sv) == 2:
-        sv = sv[1]
+        sv = sv[1]  # class 1
 
     sv = np.array(sv)
     if sv.ndim == 2:
@@ -203,7 +208,31 @@ def compute_shap_values_single_row(X_user_df: pd.DataFrame) -> np.ndarray:
     return sv
 
 # -----------------------------
-# Helpers
+# Validation helpers
+# -----------------------------
+def validate_ranges(X_user_df: pd.DataFrame):
+    """
+    Return list of (feature, val, lo, hi) for invalid values.
+    Ignore NaN (missing).
+    """
+    invalid = []
+    row = X_user_df.iloc[0]
+    for feat, (lo, hi) in FEATURE_RANGES.items():
+        if feat in row.index:
+            v = row[feat]
+            if pd.isna(v):
+                continue
+            try:
+                v = float(v)
+            except Exception:
+                invalid.append((feat, v, lo, hi))
+                continue
+            if (v < lo) or (v > hi):
+                invalid.append((feat, v, lo, hi))
+    return invalid
+
+# -----------------------------
+# Other helpers
 # -----------------------------
 def risk_band(p: float):
     if p < 0.30:
@@ -252,7 +281,7 @@ st.markdown(
 )
 
 # -----------------------------
-# Sidebar inputs (search + groups + missing)
+# Sidebar inputs (search + groups + missing + RANGE LIMITS)
 # -----------------------------
 with st.sidebar:
     st.header("Patient Inputs")
@@ -304,15 +333,25 @@ with st.sidebar:
                 with colA:
                     is_missing = st.checkbox(f"{c} missing", value=False, key=f"miss_{c}")
 
+                # apply range if we have it
+                lo_hi = FEATURE_RANGES.get(c, None)
+                min_v = float(lo_hi[0]) if lo_hi else None
+                max_v = float(lo_hi[1]) if lo_hi else None
+
                 with colB:
-                    val = st.number_input(
-                        c,
+                    kwargs = dict(
                         value=0.0,
                         step=0.1,
                         format="%.3f",
                         key=f"val_{c}",
                         disabled=is_missing
                     )
+                    if min_v is not None:
+                        kwargs["min_value"] = min_v
+                    if max_v is not None:
+                        kwargs["max_value"] = max_v
+
+                    val = st.number_input(c, **kwargs)
 
                 if is_missing:
                     input_data[c] = np.nan
@@ -370,12 +409,22 @@ with tab_pred:
         st.markdown("### Risk output")
 
         if run_pred:
-            prob = float(pipeline.predict_proba(X_user)[0, 1])
-            pred = int(prob >= threshold)
+            # --------- RANGE VALIDATION (BLOCK prediction if invalid) ----------
+            invalid = validate_ranges(X_user)
+            if invalid:
+                # show one clear message + details
+                st.error("Some inputs are out of valid range. Please check your input values.")
+                for feat, v, lo, hi in invalid[:12]:
+                    st.warning(f"❌ {feat} is not valid: {v} (valid range: {lo} to {hi})")
+                if len(invalid) > 12:
+                    st.info(f"...and {len(invalid) - 12} more invalid fields.")
+            else:
+                prob = float(pipeline.predict_proba(X_user)[0, 1])
+                pred = int(prob >= threshold)
 
-            st.session_state.last_X_user = X_user
-            st.session_state.last_prob = prob
-            st.session_state.last_pred = pred
+                st.session_state.last_X_user = X_user
+                st.session_state.last_prob = prob
+                st.session_state.last_pred = pred
 
         if st.session_state.last_prob is None:
             st.markdown('<div class="muted">Click <b>Predict Risk</b> to generate results.</div>', unsafe_allow_html=True)
@@ -470,7 +519,6 @@ with tab_shap:
 
             with r:
                 st.markdown("#### Feature impact chart")
-
                 df_plot = df_top.copy()
                 fig_height = max(5, 0.35 * len(df_plot) + 1.5)
 
@@ -490,30 +538,27 @@ with tab_shap:
 with st.expander("Advanced view: Waterfall plot (single patient)", expanded=False):
     try:
         X_to_explain = st.session_state.last_X_user
+        if X_to_explain is None:
+            st.info("Run a prediction first, then open this section.")
+        else:
+            base_value = explainer.expected_value
+            if isinstance(base_value, (list, np.ndarray)):
+                base_value = base_value[1] if len(base_value) > 1 else base_value[0]
 
-        # base value for model output (log-odds space)
-        base_value = explainer.expected_value
-        if isinstance(base_value, (list, np.ndarray)):
-            base_value = base_value[1] if len(base_value) > 1 else base_value[0]
+            X_imp = imputer.transform(X_to_explain[feature_cols])
+            sv = compute_shap_values_single_row(X_to_explain)
 
-        # imputed input (same as model sees)
-        X_imp = imputer.transform(X_to_explain[feature_cols])
+            exp = shap.Explanation(
+                values=sv,
+                base_values=base_value,
+                data=X_imp[0],
+                feature_names=feature_cols,
+            )
 
-        # SHAP values for this single patient
-        sv = compute_shap_values_single_row(X_to_explain)
-
-        exp = shap.Explanation(
-            values=sv,
-            base_values=base_value,
-            data=X_imp[0],
-            feature_names=feature_cols,
-        )
-
-        # Make plot larger so labels don’t overlap
-        fig2 = plt.figure(figsize=(10, 7))
-        shap.plots.waterfall(exp, max_display=20, show=False)
-        plt.tight_layout()
-        st.pyplot(fig2)
+            fig2 = plt.figure(figsize=(10, 7))
+            shap.plots.waterfall(exp, max_display=20, show=False)
+            plt.tight_layout()
+            st.pyplot(fig2)
 
     except Exception as e:
         st.warning(f"Could not render waterfall plot. Details: {e}")
@@ -528,9 +573,10 @@ with tab_about:
         """
 - **Model:** XGBoost classifier  
 - **Preprocessing:** Median imputation (inside the pipeline)  
-- **Inputs:** Clinical numeric features only   
+- **Inputs:** Clinical numeric features only  
 - **Output:** Probability of in-hospital mortality + binary class based on threshold  
-- **Explainability:** SHAP values (patient-level feature contributions)
+- **Explainability:** SHAP values (patient-level feature contributions)  
+- **Input validation:** Each feature has a valid range; out-of-range values are blocked.
         """
     )
     st.markdown("</div>", unsafe_allow_html=True)
