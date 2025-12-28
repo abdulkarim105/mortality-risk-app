@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 # -----------------------------
-# Styling
+# Styling (professional + title not clipped)
 # -----------------------------
 st.markdown(
     """
@@ -101,8 +101,8 @@ MODEL_FILENAME = "mortality_xgboost_pipeline.joblib"
 MODEL_PATH = os.path.join(os.path.dirname(__file__), MODEL_FILENAME)
 
 # -----------------------------
-# Feature ranges
-# Used ONLY for Streamlit number_input bounds (built-in validation)
+# Feature ranges (from your screenshot)
+# If value is outside -> show "not valid" message and block prediction
 # -----------------------------
 FEATURE_RANGES = {
     "GCS_max": (0.0, 8.0),
@@ -124,7 +124,7 @@ FEATURE_RANGES = {
     "SYSBP_STD": (0.0, 55.0),
     "DIASBP_MIN": (0.0, 90.0),
     "DIASBP_MEAN": (0.0, 115.0),
-    "AGE": (18.0, 90.0),
+    "AGE": (18.0, 95.0),
     "RR_MEAN": (0.0, 45.0),
     "RR_STD": (0.0, 15.0),
     "RR_MAX": (0.0, 65.0),
@@ -151,7 +151,7 @@ imputer = pipeline.named_steps["imputer"]
 xgb_model = pipeline.named_steps["model"]
 
 # -----------------------------
-# Group features (AGE will not go to Labs)
+# Group features (FIXED: AGE will not go to Labs)
 # -----------------------------
 def group_features(cols):
     groups = {"Vitals": [], "Labs": [], "Scores / Comorbidity": [], "Other": []}
@@ -208,13 +208,37 @@ def compute_shap_values_single_row(X_user_df: pd.DataFrame) -> np.ndarray:
     return sv
 
 # -----------------------------
+# Validation helpers
+# -----------------------------
+def validate_ranges(X_user_df: pd.DataFrame):
+    """
+    Return list of (feature, val, lo, hi) for invalid values.
+    Ignore NaN (missing).
+    """
+    invalid = []
+    row = X_user_df.iloc[0]
+    for feat, (lo, hi) in FEATURE_RANGES.items():
+        if feat in row.index:
+            v = row[feat]
+            if pd.isna(v):
+                continue
+            try:
+                v = float(v)
+            except Exception:
+                invalid.append((feat, v, lo, hi))
+                continue
+            if (v < lo) or (v > hi):
+                invalid.append((feat, v, lo, hi))
+    return invalid
+
+# -----------------------------
 # Other helpers
 # -----------------------------
 def risk_band(p: float):
     if p < 0.30:
         return "Low", "🟢"
     if p < 0.70:
-        return "Moderate", "🟡"
+      return "Moderate", "🟡"
     return "High", "🔴"
 
 def interpret(prob: float):
@@ -257,7 +281,7 @@ st.markdown(
 )
 
 # -----------------------------
-# Sidebar inputs (Streamlit bounds only)
+# Sidebar inputs (search + groups + missing + RANGE LIMITS)
 # -----------------------------
 with st.sidebar:
     st.header("Patient Inputs")
@@ -309,34 +333,17 @@ with st.sidebar:
                 with colA:
                     is_missing = st.checkbox(f"{c} missing", value=False, key=f"miss_{c}")
 
-                # bounds for Streamlit validation
+                # apply range if we have it
                 lo_hi = FEATURE_RANGES.get(c, None)
                 min_v = float(lo_hi[0]) if lo_hi else None
                 max_v = float(lo_hi[1]) if lo_hi else None
 
-                key_val = f"val_{c}"
-
-                # ---- IMPORTANT FIX: clamp session_state value to bounds ----
-                if key_val in st.session_state:
-                    try:
-                        cur = float(st.session_state[key_val])
-                        if min_v is not None and cur < min_v:
-                            st.session_state[key_val] = min_v
-                        if max_v is not None and cur > max_v:
-                            st.session_state[key_val] = max_v
-                    except Exception:
-                        # if bad state, reset to safe default
-                        st.session_state[key_val] = min_v if min_v is not None else 0.0
-                else:
-                    # first time: choose a default within bounds
-                    st.session_state[key_val] = min_v if min_v is not None else 0.0
-
                 with colB:
                     kwargs = dict(
-                        value=st.session_state[key_val],
+                        value=0.0,
                         step=0.1,
-                        format="%.2f",
-                        key=key_val,
+                        format="%.3f",
+                        key=f"val_{c}",
                         disabled=is_missing
                     )
                     if min_v is not None:
@@ -402,13 +409,22 @@ with tab_pred:
         st.markdown("### Risk output")
 
         if run_pred:
-            # Only Streamlit widget validation is used (min/max bounds on inputs)
-            prob = float(pipeline.predict_proba(X_user)[0, 1])
-            pred = int(prob >= threshold)
+            # --------- RANGE VALIDATION (BLOCK prediction if invalid) ----------
+            invalid = validate_ranges(X_user)
+            if invalid:
+                # show one clear message + details
+                st.error("Some inputs are out of valid range. Please check your input values.")
+                for feat, v, lo, hi in invalid[:12]:
+                    st.warning(f"❌ {feat} is not valid: {v} (valid range: {lo} to {hi})")
+                if len(invalid) > 12:
+                    st.info(f"...and {len(invalid) - 12} more invalid fields.")
+            else:
+                prob = float(pipeline.predict_proba(X_user)[0, 1])
+                pred = int(prob >= threshold)
 
-            st.session_state.last_X_user = X_user
-            st.session_state.last_prob = prob
-            st.session_state.last_pred = pred
+                st.session_state.last_X_user = X_user
+                st.session_state.last_prob = prob
+                st.session_state.last_pred = pred
 
         if st.session_state.last_prob is None:
             st.markdown('<div class="muted">Click <b>Predict Risk</b> to generate results.</div>', unsafe_allow_html=True)
@@ -560,7 +576,8 @@ with tab_about:
 - **Inputs:** Clinical numeric features only  
 - **Output:** Probability of in-hospital mortality + binary class based on threshold  
 - **Explainability:** SHAP values (patient-level feature contributions)  
-- **Input validation:** Streamlit widget bounds (min/max) enforce valid ranges.
+- **Input validation:** Each feature has a valid range; out-of-range values are blocked.
         """
     )
     st.markdown("</div>", unsafe_allow_html=True)
+
