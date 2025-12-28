@@ -101,8 +101,8 @@ MODEL_FILENAME = "mortality_xgboost_pipeline.joblib"
 MODEL_PATH = os.path.join(os.path.dirname(__file__), MODEL_FILENAME)
 
 # -----------------------------
-# Feature ranges (from your screenshot)
-# If value is outside -> show "not valid" message and block prediction
+# Feature ranges
+# Used ONLY for Streamlit widget min/max bounds (built-in validation)
 # -----------------------------
 FEATURE_RANGES = {
     "GCS_max": (0.0, 8.0),
@@ -124,7 +124,7 @@ FEATURE_RANGES = {
     "SYSBP_STD": (0.0, 55.0),
     "DIASBP_MIN": (0.0, 90.0),
     "DIASBP_MEAN": (0.0, 115.0),
-    "AGE": (18.0, 95.0),
+    "AGE": (18.0, 90.0),
     "RR_MEAN": (0.0, 45.0),
     "RR_STD": (0.0, 15.0),
     "RR_MAX": (0.0, 65.0),
@@ -151,7 +151,7 @@ imputer = pipeline.named_steps["imputer"]
 xgb_model = pipeline.named_steps["model"]
 
 # -----------------------------
-# Group features (FIXED: AGE will not go to Labs)
+# Group features (AGE will not go to Labs)
 # -----------------------------
 def group_features(cols):
     groups = {"Vitals": [], "Labs": [], "Scores / Comorbidity": [], "Other": []}
@@ -207,7 +207,6 @@ def compute_shap_values_single_row(X_user_df: pd.DataFrame) -> np.ndarray:
         return sv[0]
     return sv
 
-
 # -----------------------------
 # Other helpers
 # -----------------------------
@@ -215,7 +214,7 @@ def risk_band(p: float):
     if p < 0.30:
         return "Low", "🟢"
     if p < 0.70:
-      return "Moderate", "🟡"
+        return "Moderate", "🟡"
     return "High", "🔴"
 
 def interpret(prob: float):
@@ -258,7 +257,7 @@ st.markdown(
 )
 
 # -----------------------------
-# Sidebar inputs (search + groups + missing + RANGE LIMITS)
+# Sidebar inputs (search + groups + missing + STREAMLIT RANGE BOUNDS ONLY)
 # -----------------------------
 with st.sidebar:
     st.header("Patient Inputs")
@@ -310,7 +309,7 @@ with st.sidebar:
                 with colA:
                     is_missing = st.checkbox(f"{c} missing", value=False, key=f"miss_{c}")
 
-                # apply range if we have it
+                # Use range bounds ONLY to power Streamlit number_input validation
                 lo_hi = FEATURE_RANGES.get(c, None)
                 min_v = float(lo_hi[0]) if lo_hi else None
                 max_v = float(lo_hi[1]) if lo_hi else None
@@ -386,12 +385,13 @@ with tab_pred:
         st.markdown("### Risk output")
 
         if run_pred:
-                prob = float(pipeline.predict_proba(X_user)[0, 1])
-                pred = int(prob >= threshold)
+            # No custom range validation: rely only on Streamlit widget min/max validation
+            prob = float(pipeline.predict_proba(X_user)[0, 1])
+            pred = int(prob >= threshold)
 
-                st.session_state.last_X_user = X_user
-                st.session_state.last_prob = prob
-                st.session_state.last_pred = pred
+            st.session_state.last_X_user = X_user
+            st.session_state.last_prob = prob
+            st.session_state.last_pred = pred
 
         if st.session_state.last_prob is None:
             st.markdown('<div class="muted">Click <b>Predict Risk</b> to generate results.</div>', unsafe_allow_html=True)
@@ -543,8 +543,7 @@ with tab_about:
 - **Inputs:** Clinical numeric features only  
 - **Output:** Probability of in-hospital mortality + binary class based on threshold  
 - **Explainability:** SHAP values (patient-level feature contributions)  
-- **Input validation:** Each feature has a valid range; out-of-range values are blocked.
+- **Input validation:** Streamlit widget bounds (min/max) enforce valid ranges.
         """
     )
     st.markdown("</div>", unsafe_allow_html=True)
-
