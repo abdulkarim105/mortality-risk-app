@@ -161,7 +161,7 @@ FEATURE_RANGES = {
     "SYSBP_STD": (0.0, 55.0),
     "DIASBP_MIN": (0.0, 90.0),
     "DIASBP_MEAN": (0.0, 115.0),
-    "AGE": (18, 95.0),
+    "AGE": (18.0, 95.0),
     "RR_MEAN": (0.0, 45.0),
     "RR_STD": (0.0, 15.0),
     "RR_MAX": (0.0, 65.0),
@@ -354,16 +354,23 @@ with st.sidebar:
                 with colB:
                     default_val = get_default_value_for_feature(c)
                     val = st.number_input(
-                         c,
-                         min_value=lo,
-                         max_value=hi,
-                         value=float(np.clip(0.0, lo, hi)),  # safe default
-                         step=0.1,
-                         format="%.3f",
-                         disabled=is_missing,
-                         key=f"val_{c}"
-                       )
+                        c,
+                        value=float(default_val),
+                        step=0.1,
+                        format="%.3f",
+                        key=f"val_{c}",
+                        disabled=is_missing
+                    )
 
+                    # Range validation: only if not missing and the feature has a configured range
+                    if (not is_missing) and (c in FEATURE_RANGES):
+                        lo, hi = FEATURE_RANGES[c]
+                        if float(val) < lo or float(val) > hi:
+                            invalid_features.append(c)
+                            st.error(
+                                f"{c} is not valid. Allowed range: [{lo:.3f}, {hi:.3f}]. "
+                                f"Please check your input."
+                            )
 
                 if is_missing:
                     input_data[c] = np.nan
