@@ -267,19 +267,6 @@ def interpret(prob: float):
         return icon, band, "Moderate risk band based on the model output."
     return icon, band, "Higher risk band based on the model output."
 
-def safe_default_for_feature(c: str) -> float:
-    """
-    IMPORTANT: If we set min_value/max_value in st.number_input,
-    Streamlit requires the default 'value' to be within range.
-    We choose a safe default inside range if available.
-    """
-    if c in FEATURE_RANGES:
-        lo, hi = FEATURE_RANGES[c]
-        # choose the midpoint (inside range)
-        v = (float(lo) + float(hi)) / 2.0
-        return float(v)
-    # fallback: 0.0 (no min/max enforced)
-    return 0.0
 
 # -----------------------------
 # Session state
@@ -604,3 +591,4 @@ with tab_about:
         """
     )
     st.markdown("</div>", unsafe_allow_html=True)
+
