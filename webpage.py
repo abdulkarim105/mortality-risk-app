@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 # -----------------------------
-# Styling
+# Styling (professional + title not clipped)
 # -----------------------------
 st.markdown(
     """
@@ -101,8 +101,7 @@ MODEL_FILENAME = "mortality_xgboost_pipeline.joblib"
 MODEL_PATH = os.path.join(os.path.dirname(__file__), MODEL_FILENAME)
 
 # -----------------------------
-# Feature ranges
-# Used ONLY for Streamlit number_input bounds (built-in validation)
+# Feature ranges (Streamlit widget min/max only)
 # -----------------------------
 FEATURE_RANGES = {
     "GCS_max": (0.0, 8.0),
@@ -151,7 +150,7 @@ imputer = pipeline.named_steps["imputer"]
 xgb_model = pipeline.named_steps["model"]
 
 # -----------------------------
-# Group features (AGE will not go to Labs)
+# Group features
 # -----------------------------
 def group_features(cols):
     groups = {"Vitals": [], "Labs": [], "Scores / Comorbidity": [], "Other": []}
@@ -187,7 +186,7 @@ def group_features(cols):
 feature_groups = group_features(feature_cols)
 
 # -----------------------------
-# SHAP explainer (cached)
+# SHAP explainer
 # -----------------------------
 @st.cache_resource
 def build_shap_explainer(_xgb_model):
@@ -208,7 +207,7 @@ def compute_shap_values_single_row(X_user_df: pd.DataFrame) -> np.ndarray:
     return sv
 
 # -----------------------------
-# Other helpers
+# Helpers
 # -----------------------------
 def risk_band(p: float):
     if p < 0.30:
@@ -257,25 +256,19 @@ st.markdown(
 )
 
 # -----------------------------
-# Sidebar inputs (Streamlit bounds only)
+# Sidebar inputs (Streamlit validation only)
 # -----------------------------
 with st.sidebar:
     st.header("Patient Inputs")
 
-    threshold = st.slider(
-        "Classification threshold",
-        0.05,
-        0.95,
-        default_threshold,
-        0.01
-    )
+    threshold = st.slider("Classification threshold", 0.05, 0.95, default_threshold, 0.01)
 
     st.markdown("**Find a feature**")
     q = st.text_input(
         "Search",
         value="",
         placeholder="Type to filter (e.g., lactate, gcs, bun)",
-        label_visibility="collapsed"
+        label_visibility="collapsed",
     )
 
     st.markdown("**Show groups**")
@@ -309,40 +302,39 @@ with st.sidebar:
                 with colA:
                     is_missing = st.checkbox(f"{c} missing", value=False, key=f"miss_{c}")
 
-                # bounds for Streamlit validation
+                # bounds for number_input
                 lo_hi = FEATURE_RANGES.get(c, None)
                 min_v = float(lo_hi[0]) if lo_hi else None
                 max_v = float(lo_hi[1]) if lo_hi else None
 
                 key_val = f"val_{c}"
 
-               # clamp session_state to bounds
-                if key_val in st.session_state:
-                  try:
-                      cur = float(st.session_state[key_val])
-                      if min_v is not None and cur < min_v:
-                             st.session_state[key_val] = min_v
-                      if max_v is not None and cur > max_v:
-                             st.session_state[key_val] = max_v
-                  except Exception:
-                           # if bad state, reset to safe default
-                            st.session_state[key_val] = min_v if min_v is not None else 0.0
+                # initialize/clamp session state BEFORE widget is created
+                if key_val not in st.session_state:
+                    st.session_state[key_val] = min_v if min_v is not None else 0.0
                 else:
-                   # first time: choose a default within bounds
-                  st.session_state[key_val] = min_v if min_v is not None else 0.0
+                    try:
+                        cur = float(st.session_state[key_val])
+                        if min_v is not None and cur < min_v:
+                            st.session_state[key_val] = min_v
+                        if max_v is not None and cur > max_v:
+                            st.session_state[key_val] = max_v
+                    except Exception:
+                        st.session_state[key_val] = min_v if min_v is not None else 0.0
 
-                 with colB:
-                   kwargs = dict(
+                with colB:
+                    kwargs = dict(
                         step=0.1,
-                        format="%.3f",
+                        format="%.2f",
                         key=key_val,
-                        disabled=is_missing
+                        disabled=is_missing,
                     )
                     if min_v is not None:
-                         kwargs["min_value"] = min_v
+                        kwargs["min_value"] = min_v
                     if max_v is not None:
-                         kwargs["max_value"] = max_v
+                        kwargs["max_value"] = max_v
 
+                    # IMPORTANT: do NOT pass value= when using session_state + key
                     val = st.number_input(c, **kwargs)
 
                 if is_missing:
@@ -365,11 +357,7 @@ X_user = pd.DataFrame([input_data])[feature_cols]
 # -----------------------------
 # Tabs
 # -----------------------------
-tab_pred, tab_shap, tab_about = st.tabs([
-    "📈 Risk Prediction",
-    "🧠 Model Explainability",
-    "📄 About the Model"
-])
+tab_pred, tab_shap, tab_about = st.tabs(["📈 Risk Prediction", "🧠 Model Explainability", "📄 About the Model"])
 
 # -----------------------------
 # Prediction tab
@@ -384,7 +372,7 @@ with tab_pred:
         with st.expander("View input table (all features)", expanded=False):
             st.dataframe(X_user, use_container_width=True, hide_index=True)
 
-        if len(missing_cols) > 0:
+        if missing_cols:
             st.markdown(
                 f"<div class='soft muted'><b>Marked as missing:</b> {', '.join(missing_cols[:20])}"
                 + (" ..." if len(missing_cols) > 20 else "")
@@ -401,7 +389,6 @@ with tab_pred:
         st.markdown("### Risk output")
 
         if run_pred:
-            # Only Streamlit widget validation is used (min/max bounds on inputs)
             prob = float(pipeline.predict_proba(X_user)[0, 1])
             pred = int(prob >= threshold)
 
@@ -518,6 +505,9 @@ with tab_shap:
             st.caption("SHAP is computed on demand using TreeExplainer for XGBoost.")
             st.markdown("</div>", unsafe_allow_html=True)
 
+# -----------------------------
+# Waterfall plot
+# -----------------------------
 with st.expander("Advanced view: Waterfall plot (single patient)", expanded=False):
     try:
         X_to_explain = st.session_state.last_X_user
@@ -563,6 +553,3 @@ with tab_about:
         """
     )
     st.markdown("</div>", unsafe_allow_html=True)
-
-
-
