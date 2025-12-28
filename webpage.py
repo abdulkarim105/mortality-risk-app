@@ -28,7 +28,7 @@ st.markdown(
         --bg-soft: rgba(249,250,251,1);
       }
 
-      /* Fix title clipping + comfortable top padding */
+      /* Fix title clipping */
       .block-container { padding-top: 3.4rem; padding-bottom: 2rem; max-width: 1280px; }
 
       .topbar{
@@ -111,14 +111,6 @@ st.markdown(
       .stDataFrame{ border-radius: 14px; overflow: hidden; }
 
       section[data-testid="stSidebar"] .block-container{ padding-top: 1.2rem; }
-
-      /* Make sidebar labels wrap instead of stacking weird */
-      section[data-testid="stSidebar"] label,
-      section[data-testid="stSidebar"] p,
-      section[data-testid="stSidebar"] span{
-        overflow-wrap:anywhere;
-        word-break:break-word;
-      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -131,7 +123,7 @@ MODEL_FILENAME = "mortality_xgboost_pipeline.joblib"
 MODEL_PATH = os.path.join(os.path.dirname(__file__), MODEL_FILENAME)
 
 # -----------------------------
-# Load pipeline object (single bundle)
+# Load pipeline object
 # -----------------------------
 @st.cache_resource
 def load_obj():
@@ -142,14 +134,12 @@ pipeline = obj["pipeline"]
 feature_cols = obj["feature_cols"]
 default_threshold = float(obj.get("threshold", 0.5))
 
-# Pipeline steps
 imputer = pipeline.named_steps["imputer"]
 xgb_model = pipeline.named_steps["model"]
 
 # -----------------------------
-# Valid ranges (Streamlit validation ONLY)
-# These should match your dataset min/max screenshot.
-# If a feature is missing here, it will fall back to no range limits.
+# Valid ranges (from your dataset mins/maxs)
+# IMPORTANT: keys MUST match feature_cols exactly (case-sensitive).
 # -----------------------------
 FEATURE_RANGES = {
     "GCS_max": (0.0, 8.0),
@@ -171,7 +161,7 @@ FEATURE_RANGES = {
     "SYSBP_STD": (0.0, 55.0),
     "DIASBP_MIN": (0.0, 90.0),
     "DIASBP_MEAN": (0.0, 115.0),
-    "AGE": (0.0, 95.0),
+    "AGE": (18, 95.0),
     "RR_MEAN": (0.0, 45.0),
     "RR_STD": (0.0, 15.0),
     "RR_MAX": (0.0, 65.0),
@@ -181,8 +171,20 @@ FEATURE_RANGES = {
     "HR_MAX": (0.0, 250.0),
     "age_adj_comorbidity_score": (0.0, 65.0),
 }
+
+# Optional: if your model has features not listed above, they will not be range-validated.
+# You can add them to FEATURE_RANGES anytime.
+
+def get_default_value_for_feature(c: str) -> float:
+    """Choose a safe default inside the valid range (if known)."""
+    if c in FEATURE_RANGES:
+        lo, hi = FEATURE_RANGES[c]
+        # pick lower bound to avoid invalid initial values (e.g., AGE must be >= 18)
+        return float(lo)
+    return 0.0
+
 # -----------------------------
-# Feature grouping (FIXED: AGE not in Labs)
+# Group features (FIXED: AGE will not go to Labs)
 # -----------------------------
 def group_features(cols):
     groups = {"Vitals": [], "Labs": [], "Scores / Comorbidity": [], "Other": []}
@@ -190,14 +192,14 @@ def group_features(cols):
     score_keys = ("GCS", "SOFA", "SAPS", "OASIS", "COMORB", "AGE", "COMORBIDITY", "SCORE")
     vitals_keys = ("HR", "RR", "SBP", "DBP", "MBP", "SYSBP", "DIASBP", "SPO2", "TEMP", "O2", "RESP")
 
-    # Strict lab tokens (do NOT include raw "AG" because it matches AGE!)
+    # Lab tokens (do NOT include raw "AG" here)
     labs_tokens = {
         "BUN", "CREAT", "WBC", "HGB", "HCT", "PLT", "SOD", "POT", "CHL", "GLU",
         "BILI", "ALT", "AST", "ALB", "LACT", "LACTATE", "BILIRUBIN"
     }
 
     def is_anion_gap(name: str) -> bool:
-        # matches AG, AG_, _AG but NOT AGE
+        # matches AG, AG_, _AG, _AG_ but NOT AGE
         u = name.upper()
         return (u == "AG") or ("AG_" in u) or ("_AG" in u)
 
@@ -222,6 +224,7 @@ def group_features(cols):
 
     return {k: v for k, v in groups.items() if v}
 
+# IMPORTANT: create feature_groups (this prevents NameError)
 feature_groups = group_features(feature_cols)
 
 # -----------------------------
@@ -234,13 +237,9 @@ def build_shap_explainer(_xgb_model):
 explainer = build_shap_explainer(xgb_model)
 
 def compute_shap_values_single_row(X_user_df: pd.DataFrame) -> np.ndarray:
-    """
-    Returns 1D array: one SHAP value per feature in feature_cols (single patient).
-    """
     X_imp = imputer.transform(X_user_df[feature_cols])
     sv = explainer.shap_values(X_imp)
 
-    # For binary classifiers, SHAP sometimes returns [class0, class1]
     if isinstance(sv, list) and len(sv) == 2:
         sv = sv[1]
 
@@ -256,7 +255,7 @@ def risk_band(p: float):
     if p < 0.30:
         return "Low", "🟢"
     if p < 0.70:
-        return "Moderate", "🟠"
+        return "Moderate", "🟡"
     return "High", "🔴"
 
 def interpret(prob: float):
@@ -266,7 +265,6 @@ def interpret(prob: float):
     if band == "Moderate":
         return icon, band, "Moderate risk band based on the model output."
     return icon, band, "Higher risk band based on the model output."
-
 
 # -----------------------------
 # Session state
@@ -300,7 +298,7 @@ st.markdown(
 )
 
 # -----------------------------
-# Sidebar inputs (search + groups + missing) + Streamlit range validation ONLY
+# Sidebar inputs (search + groups + missing + RANGE VALIDATION)
 # -----------------------------
 with st.sidebar:
     st.header("Patient Inputs")
@@ -334,6 +332,7 @@ with st.sidebar:
 
     input_data = {}
     missing_cols = []
+    invalid_features = []  # <--- track out-of-range fields
 
     for g in selected_groups:
         cols_in_g = feature_groups.get(g, [])
@@ -346,7 +345,6 @@ with st.sidebar:
             continue
 
         with st.expander(g, expanded=(g in ["Vitals", "Labs"])):
-
             for c in cols_in_g:
                 colA, colB = st.columns([0.42, 0.58])
 
@@ -354,24 +352,18 @@ with st.sidebar:
                     is_missing = st.checkbox(f"{c} missing", value=False, key=f"miss_{c}")
 
                 with colB:
-                    # Build kwargs for Streamlit validation if range exists
-                    kwargs = {
-                        "value": safe_default_for_feature(c),
-                        "step": 0.1,
-                        "format": "%.3f",
-                        "disabled": is_missing,
-                        "key": f"val_{c}",
-                    }
+                    default_val = get_default_value_for_feature(c)
+                    val = st.number_input(
+                         c,
+                         min_value=lo,
+                         max_value=hi,
+                         value=float(np.clip(0.0, lo, hi)),  # safe default
+                         step=0.1,
+                         format="%.3f",
+                         disabled=is_missing,
+                         key=f"val_{c}"
+                       )
 
-                    if c in FEATURE_RANGES:
-                        lo, hi = FEATURE_RANGES[c]
-                        kwargs["min_value"] = float(lo)
-                        kwargs["max_value"] = float(hi)
-
-                        # Ensure default is inside range (very important)
-                        kwargs["value"] = float(np.clip(kwargs["value"], float(lo), float(hi)))
-
-                    val = st.number_input(c, **kwargs)
 
                 if is_missing:
                     input_data[c] = np.nan
@@ -385,7 +377,20 @@ with st.sidebar:
             input_data[c] = np.nan
 
     st.markdown("---")
-    run_pred = st.button("Predict Risk", use_container_width=True)
+
+    # Show summary and disable prediction if any invalid input exists
+    if len(invalid_features) > 0:
+        st.warning(
+            f"{len(invalid_features)} feature(s) out of range: "
+            + ", ".join(invalid_features[:8])
+            + (" ..." if len(invalid_features) > 8 else "")
+        )
+
+    run_pred = st.button(
+        "Predict Risk",
+        use_container_width=True,
+        disabled=(len(invalid_features) > 0)
+    )
 
 # Build input DF in correct order
 X_user = pd.DataFrame([input_data])[feature_cols]
@@ -546,18 +551,21 @@ with tab_shap:
             st.caption("SHAP is computed on demand using TreeExplainer for XGBoost.")
             st.markdown("</div>", unsafe_allow_html=True)
 
-# Advanced SHAP view: Waterfall plot
 with st.expander("Advanced view: Waterfall plot (single patient)", expanded=False):
     try:
         X_to_explain = st.session_state.last_X_user
         if X_to_explain is None:
-            st.info("Run a prediction first, then open this section.")
+            st.info("Run a prediction first to enable the waterfall plot.")
         else:
+            # base value for model output (log-odds space)
             base_value = explainer.expected_value
             if isinstance(base_value, (list, np.ndarray)):
                 base_value = base_value[1] if len(base_value) > 1 else base_value[0]
 
+            # imputed input (same as model sees)
             X_imp = imputer.transform(X_to_explain[feature_cols])
+
+            # SHAP values for this single patient
             sv = compute_shap_values_single_row(X_to_explain)
 
             exp = shap.Explanation(
@@ -591,4 +599,3 @@ with tab_about:
         """
     )
     st.markdown("</div>", unsafe_allow_html=True)
-
