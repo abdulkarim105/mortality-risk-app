@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 # -----------------------------
-# Styling (professional + title not clipped)
+# Styling
 # -----------------------------
 st.markdown(
     """
@@ -102,7 +102,7 @@ MODEL_PATH = os.path.join(os.path.dirname(__file__), MODEL_FILENAME)
 
 # -----------------------------
 # Feature ranges
-# Used ONLY for Streamlit widget min/max bounds (built-in validation)
+# Used ONLY for Streamlit number_input bounds (built-in validation)
 # -----------------------------
 FEATURE_RANGES = {
     "GCS_max": (0.0, 8.0),
@@ -257,7 +257,7 @@ st.markdown(
 )
 
 # -----------------------------
-# Sidebar inputs (search + groups + missing + STREAMLIT RANGE BOUNDS ONLY)
+# Sidebar inputs (Streamlit bounds only)
 # -----------------------------
 with st.sidebar:
     st.header("Patient Inputs")
@@ -309,17 +309,34 @@ with st.sidebar:
                 with colA:
                     is_missing = st.checkbox(f"{c} missing", value=False, key=f"miss_{c}")
 
-                # Use range bounds ONLY to power Streamlit number_input validation
+                # bounds for Streamlit validation
                 lo_hi = FEATURE_RANGES.get(c, None)
                 min_v = float(lo_hi[0]) if lo_hi else None
                 max_v = float(lo_hi[1]) if lo_hi else None
 
+                key_val = f"val_{c}"
+
+                # ---- IMPORTANT FIX: clamp session_state value to bounds ----
+                if key_val in st.session_state:
+                    try:
+                        cur = float(st.session_state[key_val])
+                        if min_v is not None and cur < min_v:
+                            st.session_state[key_val] = min_v
+                        if max_v is not None and cur > max_v:
+                            st.session_state[key_val] = max_v
+                    except Exception:
+                        # if bad state, reset to safe default
+                        st.session_state[key_val] = min_v if min_v is not None else 0.0
+                else:
+                    # first time: choose a default within bounds
+                    st.session_state[key_val] = min_v if min_v is not None else 0.0
+
                 with colB:
                     kwargs = dict(
-                        value=0.0,
+                        value=st.session_state[key_val],
                         step=0.1,
-                        format="%.3f",
-                        key=f"val_{c}",
+                        format="%.2f",
+                        key=key_val,
                         disabled=is_missing
                     )
                     if min_v is not None:
@@ -385,7 +402,7 @@ with tab_pred:
         st.markdown("### Risk output")
 
         if run_pred:
-            # No custom range validation: rely only on Streamlit widget min/max validation
+            # Only Streamlit widget validation is used (min/max bounds on inputs)
             prob = float(pipeline.predict_proba(X_user)[0, 1])
             pred = int(prob >= threshold)
 
