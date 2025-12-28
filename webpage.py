@@ -314,35 +314,34 @@ with st.sidebar:
                 min_v = float(lo_hi[0]) if lo_hi else None
                 max_v = float(lo_hi[1]) if lo_hi else None
 
-                key_val = f"val_{c}"
+               key_val = f"val_{c}"
 
-                # ---- IMPORTANT FIX: clamp session_state value to bounds ----
-                if key_val in st.session_state:
-                    try:
-                        cur = float(st.session_state[key_val])
-                        if min_v is not None and cur < min_v:
-                            st.session_state[key_val] = min_v
-                        if max_v is not None and cur > max_v:
-                            st.session_state[key_val] = max_v
-                    except Exception:
-                        # if bad state, reset to safe default
-                        st.session_state[key_val] = min_v if min_v is not None else 0.0
-                else:
-                    # first time: choose a default within bounds
-                    st.session_state[key_val] = min_v if min_v is not None else 0.0
+               # clamp session_state to bounds
+               if key_val in st.session_state:
+                  try:
+                      cur = float(st.session_state[key_val])
+                      if min_v is not None and cur < min_v:
+                             st.session_state[key_val] = min_v
+                      if max_v is not None and cur > max_v:
+                             st.session_state[key_val] = max_v
+                  except Exception:
+                           # if bad state, reset to safe default
+                            st.session_state[key_val] = min_v if min_v is not None else 0.0
+               else:
+                   # first time: choose a default within bounds
+                  st.session_state[key_val] = min_v if min_v is not None else 0.0
 
-                with colB:
-                    kwargs = dict(
-                        value=st.session_state[key_val],
+               with colB:
+                   kwargs = dict(
                         step=0.1,
-                        format="%.2f",
+                        format="%.3f",
                         key=key_val,
                         disabled=is_missing
                     )
                     if min_v is not None:
-                        kwargs["min_value"] = min_v
+                         kwargs["min_value"] = min_v
                     if max_v is not None:
-                        kwargs["max_value"] = max_v
+                         kwargs["max_value"] = max_v
 
                     val = st.number_input(c, **kwargs)
 
@@ -564,4 +563,5 @@ with tab_about:
         """
     )
     st.markdown("</div>", unsafe_allow_html=True)
+
 
