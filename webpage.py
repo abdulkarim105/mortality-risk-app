@@ -314,10 +314,10 @@ with st.sidebar:
                 min_v = float(lo_hi[0]) if lo_hi else None
                 max_v = float(lo_hi[1]) if lo_hi else None
 
-               key_val = f"val_{c}"
+                key_val = f"val_{c}"
 
                # clamp session_state to bounds
-               if key_val in st.session_state:
+                if key_val in st.session_state:
                   try:
                       cur = float(st.session_state[key_val])
                       if min_v is not None and cur < min_v:
@@ -327,11 +327,11 @@ with st.sidebar:
                   except Exception:
                            # if bad state, reset to safe default
                             st.session_state[key_val] = min_v if min_v is not None else 0.0
-               else:
+                else:
                    # first time: choose a default within bounds
                   st.session_state[key_val] = min_v if min_v is not None else 0.0
 
-               with colB:
+                 with colB:
                    kwargs = dict(
                         step=0.1,
                         format="%.3f",
@@ -563,5 +563,6 @@ with tab_about:
         """
     )
     st.markdown("</div>", unsafe_allow_html=True)
+
 
 
