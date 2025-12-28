@@ -255,7 +255,7 @@ def risk_band(p: float):
     if p < 0.30:
         return "Low", "🟢"
     if p < 0.70:
-        return "Moderate", "🟠"
+        return "Moderate", "🟡"
     return "High", "🔴"
 
 def interpret(prob: float):
@@ -606,3 +606,4 @@ with tab_about:
         """
     )
     st.markdown("</div>", unsafe_allow_html=True)
+
