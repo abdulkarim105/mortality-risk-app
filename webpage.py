@@ -124,7 +124,7 @@ FEATURE_RANGES = {
     "SYSBP_STD": (0.0, 55.0),
     "DIASBP_MIN": (0.0, 90.0),
     "DIASBP_MEAN": (0.0, 115.0),
-    "AGE": (18.0, 95.0),
+    "AGE": (18.0, 90.0),
     "RR_MEAN": (0.0, 45.0),
     "RR_STD": (0.0, 15.0),
     "RR_MAX": (0.0, 65.0),
@@ -134,6 +134,7 @@ FEATURE_RANGES = {
     "HR_MAX": (0.0, 250.0),
     "age_adj_comorbidity_score": (0.0, 65.0),
 }
+
 
 # -----------------------------
 # Load pipeline object
@@ -238,7 +239,7 @@ def risk_band(p: float):
     if p < 0.30:
         return "Low", "🟢"
     if p < 0.70:
-      return "Moderate", "🟡"
+        return "Moderate", "🟠"
     return "High", "🔴"
 
 def interpret(prob: float):
@@ -580,4 +581,3 @@ with tab_about:
         """
     )
     st.markdown("</div>", unsafe_allow_html=True)
-
